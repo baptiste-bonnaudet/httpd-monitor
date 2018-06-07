@@ -1,0 +1,9 @@
+version: "3"
+services:
+  web:
+    image: httpd:alpine
+    ports:
+      - "80:80"
+    volumes:
+      - .volumes/logs/access.log:/var/log/access.log:delegated
+      - .volumes/apache/httpd.conf:/usr/local/apache2/conf/httpd.conf:cached
