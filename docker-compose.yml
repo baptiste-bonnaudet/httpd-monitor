@@ -7,3 +7,11 @@ services:
     volumes:
       - .volumes/logs/access.log:/var/log/access.log:delegated
       - .volumes/apache/httpd.conf:/usr/local/apache2/conf/httpd.conf:cached
+
+  app:
+    build: .
+    image: httpd_monitor:latest
+    volumes:
+      - .volumes/logs/access.log:${ACCESS_LOG}:delegated
+    environment:
+      - "ACCESS_LOG=${ACCESS_LOG}"
