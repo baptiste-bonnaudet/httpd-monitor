@@ -1,22 +1,3 @@
-//127.0.0.1 user-identifier frank [10/Oct/2000:13:55:36 -0700] "GET /apache_pb.gif HTTP/1.0" 200 2326
-
-// A "-" in a field indicates missing data.
-
-// 127.0.0.1 is the IP address of the client (remote host) which made the request to the server.
-// user-identifier is the RFC 1413 identity of the client.
-// frank is the userid of the person requesting the document.
-// [10/Oct/2000:13:55:36 -0700] is the date, time, and time zone that the request was received, by default in strftime format %d/%b/%Y:%H:%M:%S %z.
-// "GET /apache_pb.gif HTTP/1.0" is the request line from the client. The method GET, /apache_pb.gif the resource requested, and HTTP/1.0 the HTTP protocol.
-// 200 is the HTTP status code returned to the client. 2xx is a successful response, 3xx a redirection, 4xx a client error, and 5xx a server error.
-// 2326 is the size of the object returned to the client, measured in bytes.
-
-// Display stats every 10s about the traffic during those 10s:
-// the sections of the web site with the most hits,
-// as well as interesting summary statistics on the traffic as a whole.
-// A section is defined as being what's before the second '/' in the path.
-// For example, the section for "http://my.site.com/pages/create” is
-// "http://my.site.com/pages".
-
 package main
 
 import (
@@ -49,10 +30,16 @@ type logLine struct {
 	size      int
 }
 
+type stats struct {
+	reqCount int
+	sections map[string]int
+	status   map[int]int
+}
+
 var splitRegex = regexp.MustCompile("'.+'|\".+\"|\\[.+\\]|\\S+")
 var apacheTimestampLayout = "[02/Jan/2006:15:04:05 -0700]"
 
-func parseLog(line string) {
+func parseLog(line string) logLine {
 	log := logLine{}
 	parts := splitRegex.FindAllString(line, -1)
 	for k, v := range parts {
@@ -88,20 +75,86 @@ func parseLog(line string) {
 			}
 		}
 	}
-	spew.Dump(log)
+	return log
+}
+
+func updateStats(stats *stats, log logLine) {
+	stats.reqCount = stats.reqCount + 1
+	stats.status[log.status] = stats.status[log.status] + 1
+	section := strings.Split(log.request.path, "/")[1]
+	stats.sections[section] = stats.sections[section] + 1
+}
+
+func monitor(filePath string, stats *stats) {
+	t, err := tail.TailFile(filePath, tail.Config{Follow: true})
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	for line := range t.Lines {
+		log := parseLog(line.Text)
+		spew.Dump(log)
+		updateStats(stats, log)
+	}
+}
+
+func updateAndNotify(stats *stats) {
+	for {
+		time.Sleep(2 * time.Second)
+		spew.Dump(stats)
+		timestamp := time.Now()
+
+		fmt.Printf("[Notify]\n")
+		fmt.Printf("Timestamp: %s \n", timestamp)
+		fmt.Printf("Requests: %d \n", stats.reqCount)
+		fmt.Printf("Top hit sections:\n")
+		fmt.Printf("Top hit status:\n")
+		// for k, _ := range stats.status {
+		// 	if k > 5 {
+		// 		break
+		// 	}
+		// 	fmt.Printf("\t-\n")
+
+		// }
+		// type notify struct {
+		// 	time     time.Time `json:"time"`
+		// 	reqCount int       `json:"request_count"`
+		// }
+
+		// log, _ := json.Marshal(&notify{time: timestamp, reqCount: stats.reqCount})
+		// spew.Dump(notify{time: timestamp, reqCount: stats.reqCount})
+		// fmt.Println(log)
+	}
+	// (main.logLine) {
+	// 	ip: (string) (len=10) "172.23.0.1",
+	// 	clientid: (string) "",
+	// 	userid: (string) "",
+	// 	timestamp: (time.Time) 2018-06-07 21:46:36 +0000 +0000,
+	// 	request: (main.request) {
+	// 	 method: (string) (len=5) "\"POST",
+	// 	 path: (string) (len=25) "/v1/auth/token/renew-self",
+	// 	 httpVersion: (string) (len=9) "HTTP/1.1\""
+	// 	},
+	// 	status: (int) 404,
+	// 	size: (int) 222
+	//  }
 }
 
 func main() {
+
 	err := godotenv.Load()
 	if err != nil {
-		log.Fatal("Error loading .env file")
+		log.Fatal(err)
 	}
 
 	accessLog := os.Getenv("ACCESS_LOG")
-	fmt.Println(accessLog)
 
-	t, err := tail.TailFile(accessLog, tail.Config{Follow: true})
-	for line := range t.Lines {
-		parseLog(line.Text)
+	stats := stats{0, make(map[string]int), make(map[int]int)}
+
+	go monitor(accessLog, &stats)
+	go updateAndNotify(&stats)
+
+	for {
+		// main thread
 	}
 }
