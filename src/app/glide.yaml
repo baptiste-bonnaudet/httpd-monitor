@@ -1,0 +1,6 @@
+package: .
+import:
+- package: github.com/hpcloud/tail
+  version: ^1.0.0
+- package: github.com/joho/godotenv
+  version: ^1.2.0

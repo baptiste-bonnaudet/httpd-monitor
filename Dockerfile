@@ -1,11 +1,23 @@
-FROM python:3.7-rc-alpine3.7
 
-WORKDIR /usr/src/app
 
-COPY requirements.txt ./
 
-RUN pip install --no-cache-dir -r requirements.txt
 
-COPY ./src .
+FROM golang:1.10-alpine
 
-CMD [ "python", "./httpd_monitor.py" ]
+# build stage
+FROM golang:alpine AS build-env
+
+ADD ./src /src
+
+RUN set -xe; \
+  apk --no-cache add curl git; \
+  cd /src; \
+  curl https://glide.sh/get | sh;  \
+  glide install; \
+  go build -o goapp;
+
+# final stage
+FROM alpine
+WORKDIR /app
+COPY --from=build-env /src/goapp /app/
+ENTRYPOINT ./goapp
