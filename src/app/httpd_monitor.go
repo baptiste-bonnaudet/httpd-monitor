@@ -206,10 +206,7 @@ func alertAndNotify(maxAvgMessages int, stats *stats) {
 
 func main() {
 
-	err := godotenv.Load()
-	if err != nil {
-		log.Fatal(err)
-	}
+	godotenv.Load()
 
 	accessLog := os.Getenv("ACCESS_LOG")
 	maxAvgMessages, _ := strconv.Atoi(os.Getenv("MAX_AVERAGE_MESSAGES"))
