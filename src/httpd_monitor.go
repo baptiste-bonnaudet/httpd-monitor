@@ -1,10 +1,12 @@
 package main
 
 import (
+	"container/ring"
 	"fmt"
 	"log"
 	"os"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -31,10 +33,13 @@ type logLine struct {
 }
 
 type stats struct {
-	reqCount int
-	sections map[string]int
-	status   map[int]int
+	reqCounts *ring.Ring // ring buffer that contains request counts for the last alertLoopSeconds
+	sections  map[string]int
+	status    map[int]int
 }
+
+const notifyLoopSeconds = 4
+const alertLoopSeconds = 12
 
 var splitRegex = regexp.MustCompile("'.+'|\".+\"|\\[.+\\]|\\S+")
 var apacheTimestampLayout = "[02/Jan/2006:15:04:05 -0700]"
@@ -79,7 +84,12 @@ func parseLog(line string) logLine {
 }
 
 func updateStats(stats *stats, log logLine) {
-	stats.reqCount = stats.reqCount + 1
+	if stats.reqCounts.Value == nil {
+		stats.reqCounts.Value = 1
+	} else {
+		stats.reqCounts.Value = stats.reqCounts.Value.(int) + 1
+	}
+
 	stats.status[log.status] = stats.status[log.status] + 1
 	section := strings.Split(log.request.path, "/")[1]
 	stats.sections[section] = stats.sections[section] + 1
@@ -98,46 +108,70 @@ func monitor(filePath string, stats *stats) {
 	}
 }
 
-func updateAndNotify(stats *stats) {
+func alertAndNotify(stats *stats) {
+
 	for {
-		time.Sleep(2 * time.Second)
-		spew.Dump(stats)
+		time.Sleep(notifyLoopSeconds * time.Second)
 		timestamp := time.Now()
 
+		// sort Status
+		type kvStatus struct {
+			Key   int
+			Value int
+		}
+
+		var topStatus []kvStatus
+		for k, v := range stats.status {
+			topStatus = append(topStatus, kvStatus{k, v})
+		}
+
+		sort.Slice(topStatus, func(i, j int) bool {
+			return topStatus[i].Value > topStatus[j].Value
+		})
+
+		// Sort Sections
+		type kvSections struct {
+			Key   string
+			Value int
+		}
+
+		var topSections []kvSections
+		for k, v := range stats.sections {
+			topSections = append(topSections, kvSections{k, v})
+		}
+
+		sort.Slice(topSections, func(i, j int) bool {
+			return topSections[i].Value > topSections[j].Value
+		})
+
+		fmt.Println("--------------------------------------------------------------")
 		fmt.Printf("[Notify]\n")
 		fmt.Printf("Timestamp: %s \n", timestamp)
-		fmt.Printf("Requests: %d \n", stats.reqCount)
+		fmt.Printf("Requests: %d \n", stats.reqCounts.Value)
 		fmt.Printf("Top hit sections:\n")
+		for k, v := range topSections {
+			if k > 5 {
+				break
+			}
+			fmt.Printf("\t- %s: %d \n", v.Key, v.Value)
+		}
 		fmt.Printf("Top hit status:\n")
-		// for k, _ := range stats.status {
-		// 	if k > 5 {
-		// 		break
-		// 	}
-		// 	fmt.Printf("\t-\n")
+		for k, v := range topStatus {
+			if k > 5 {
+				break
+			}
+			fmt.Printf("\t- %d: %d \n", v.Key, v.Value)
+		}
 
-		// }
-		// type notify struct {
-		// 	time     time.Time `json:"time"`
-		// 	reqCount int       `json:"request_count"`
-		// }
+		// Cleanup
+		stats.reqCounts = stats.reqCounts.Move(1) //slide the ring buffer 1 stop
+		stats.reqCounts.Value = 0
+		stats.sections = make(map[string]int)
+		stats.status = make(map[int]int)
 
-		// log, _ := json.Marshal(&notify{time: timestamp, reqCount: stats.reqCount})
-		// spew.Dump(notify{time: timestamp, reqCount: stats.reqCount})
-		// fmt.Println(log)
+		// Alert
+
 	}
-	// (main.logLine) {
-	// 	ip: (string) (len=10) "172.23.0.1",
-	// 	clientid: (string) "",
-	// 	userid: (string) "",
-	// 	timestamp: (time.Time) 2018-06-07 21:46:36 +0000 +0000,
-	// 	request: (main.request) {
-	// 	 method: (string) (len=5) "\"POST",
-	// 	 path: (string) (len=25) "/v1/auth/token/renew-self",
-	// 	 httpVersion: (string) (len=9) "HTTP/1.1\""
-	// 	},
-	// 	status: (int) 404,
-	// 	size: (int) 222
-	//  }
 }
 
 func main() {
@@ -149,10 +183,14 @@ func main() {
 
 	accessLog := os.Getenv("ACCESS_LOG")
 
-	stats := stats{0, make(map[string]int), make(map[int]int)}
+	stats := stats{
+		ring.New(alertLoopSeconds / notifyLoopSeconds),
+		make(map[string]int),
+		make(map[int]int),
+	}
 
 	go monitor(accessLog, &stats)
-	go updateAndNotify(&stats)
+	go alertAndNotify(&stats)
 
 	for {
 		// main thread
