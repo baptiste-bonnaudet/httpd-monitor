@@ -15,3 +15,4 @@ services:
       - .volumes/logs/access.log:${ACCESS_LOG}:delegated
     environment:
       - "ACCESS_LOG=${ACCESS_LOG}"
+      - "MAX_AVERAGE_MESSAGES${MAX_AVERAGE_MESSAGES}"
