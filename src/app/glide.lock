@@ -1,6 +1,10 @@
-hash: 9f66b55e8dab13cca084f4c00922f838c9a6ae395e97b17baa293364366f01ca
-updated: 2018-06-08T11:29:00.600583627-04:00
+hash: 9f45588d231957cf0630dc1e39b83e7c6ef5544a518beb810c3a3b1355a68596
+updated: 2018-06-10T10:10:25.669591825-04:00
 imports:
+- name: github.com/davecgh/go-spew
+  version: 346938d642f2ec3594ed81d874461961cd0faa76
+  subpackages:
+  - spew
 - name: github.com/hpcloud/tail
   version: a30252cb686a21eb2d0b98132633053ec2f7f1e5
   subpackages:

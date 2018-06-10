@@ -12,7 +12,6 @@ import (
 	"sync"
 	"time"
 
-	// "github.com/davecgh/go-spew/spew"
 	"github.com/hpcloud/tail"
 	"github.com/joho/godotenv"
 )
@@ -37,19 +36,22 @@ type stats struct {
 	reqCounts *ring.Ring // ring buffer that contains request counts for the last alertLoopSeconds
 	sections  map[string]int
 	status    map[int]int
+	alert     bool
 	mux       sync.Mutex
 }
 
-const notifyLoopSeconds = 4
-const alertLoopSeconds = 12
+const notifyLoopSeconds = 10
+const alertLoopSeconds = 120
+const topHitOutout = 5
 
 var splitRegex = regexp.MustCompile("'.+'|\".+\"|\\[.+\\]|\\S+")
 var apacheTimestampLayout = "[02/Jan/2006:15:04:05 -0700]"
 
-func parseLog(line string) logLine {
+func ParseLog(line string) logLine {
 	log := logLine{}
 	parts := splitRegex.FindAllString(line, -1)
 	for k, v := range parts {
+		v := strings.Replace(v, "\"", "", -1)
 		if parts[k] != "-" {
 			switch k {
 			case 0:
@@ -85,7 +87,7 @@ func parseLog(line string) logLine {
 	return log
 }
 
-func updateStats(stats *stats, log logLine) {
+func UpdateStats(stats *stats, log logLine) {
 
 	stats.mux.Lock()
 	defer stats.mux.Unlock()
@@ -108,100 +110,95 @@ func monitor(filePath string, stats *stats) {
 	}
 
 	for line := range t.Lines {
-		log := parseLog(line.Text)
-		// spew.Dump(log)
-		updateStats(stats, log)
+		log := ParseLog(line.Text)
+		// TODO: do not count entries older than alertLoopSeconds
+		UpdateStats(stats, log)
 	}
 }
 
-func alertAndNotify(maxAvgMessages int, stats *stats) {
-	var alert = false
+func AlertAndNotify(maxAvgMessages int, stats *stats) {
 
-	for {
-		time.Sleep(notifyLoopSeconds * time.Second)
+	//Aquire lock
+	stats.mux.Lock()
 
-		//Aquire lock
-		stats.mux.Lock()
+	timestamp := time.Now()
 
-		timestamp := time.Now()
-
-		// sort Status
-		type kvStatus struct {
-			Key   int
-			Value int
-		}
-
-		var topStatus []kvStatus
-		for k, v := range stats.status {
-			topStatus = append(topStatus, kvStatus{k, v})
-		}
-
-		sort.Slice(topStatus, func(i, j int) bool {
-			return topStatus[i].Value > topStatus[j].Value
-		})
-
-		// Sort Sections
-		type kvSections struct {
-			Key   string
-			Value int
-		}
-
-		var topSections []kvSections
-		for k, v := range stats.sections {
-			topSections = append(topSections, kvSections{k, v})
-		}
-
-		sort.Slice(topSections, func(i, j int) bool {
-			return topSections[i].Value > topSections[j].Value
-		})
-
-		// Notify output
-		fmt.Println("--------------------------------------------------------------")
-		fmt.Printf("[Notify]\n")
-		fmt.Printf("Timestamp: %s \n", timestamp)
-		fmt.Printf("Requests: %d \n", stats.reqCounts.Value)
-		fmt.Printf("Top hit sections:\n")
-		for k, v := range topSections {
-			if k > 5 {
-				break
-			}
-			fmt.Printf("\t- %s: %d \n", v.Key, v.Value)
-		}
-		fmt.Printf("Top hit status:\n")
-		for k, v := range topStatus {
-			if k > 5 {
-				break
-			}
-			fmt.Printf("\t- %d: %d \n", v.Key, v.Value)
-		}
-
-		// Cleanup
-		stats.reqCounts = stats.reqCounts.Move(1) //slide the ring buffer 1 stop
-		stats.reqCounts.Value = 0
-		stats.sections = make(map[string]int)
-		stats.status = make(map[int]int)
-
-		// Alert
-		var totalCount int
-		for i := 1; i <= stats.reqCounts.Len(); i++ {
-			stats.reqCounts = stats.reqCounts.Next()
-			if stats.reqCounts.Value != nil {
-				totalCount = totalCount + stats.reqCounts.Value.(int)
-			}
-			fmt.Printf("Value:%d\n", stats.reqCounts.Value)
-			fmt.Printf("Len:%d\n", stats.reqCounts.Len())
-		}
-		fmt.Printf("Total:%d\n", totalCount)
-		if totalCount > maxAvgMessages && alert == false {
-			fmt.Printf("[Alert] Triggered - %d requests over the past %d seconds", totalCount, alertLoopSeconds)
-			alert = true
-		} else if totalCount <= maxAvgMessages && alert == true {
-			fmt.Printf("[Alert] Recovered - %d requests over the past %d seconds", totalCount, alertLoopSeconds)
-		}
-
-		// Release lock
-		stats.mux.Unlock()
+	// sort Status
+	type kvStatus struct {
+		Key   int
+		Value int
 	}
+
+	var topStatus []kvStatus
+	for k, v := range stats.status {
+		topStatus = append(topStatus, kvStatus{k, v})
+	}
+
+	sort.Slice(topStatus, func(i, j int) bool {
+		return topStatus[i].Value > topStatus[j].Value
+	})
+
+	// Sort Sections
+	type kvSections struct {
+		Key   string
+		Value int
+	}
+
+	var topSections []kvSections
+	for k, v := range stats.sections {
+		topSections = append(topSections, kvSections{k, v})
+	}
+
+	sort.Slice(topSections, func(i, j int) bool {
+		return topSections[i].Value > topSections[j].Value
+	})
+
+	// Notify output
+	fmt.Println("--------------------------------------------------------------")
+	fmt.Printf("[Notify]\n")
+	fmt.Printf("Timestamp: %s \n", timestamp)
+	fmt.Printf("Requests: %d \n", stats.reqCounts.Value)
+	fmt.Printf("Top hit sections:\n")
+	for k, v := range topSections {
+		if k > topHitOutout {
+			break
+		}
+		fmt.Printf("\t- %s: %d \n", v.Key, v.Value)
+	}
+	fmt.Printf("Top hit status:\n")
+	for k, v := range topStatus {
+		if k > topHitOutout {
+			break
+		}
+		fmt.Printf("\t- %d: %d \n", v.Key, v.Value)
+	}
+
+	// Cleanup
+	stats.reqCounts = stats.reqCounts.Move(1) //slide the ring buffer 1 stop
+	stats.reqCounts.Value = 0
+	stats.sections = make(map[string]int)
+	stats.status = make(map[int]int)
+
+	// Alert
+	var totalCount int
+
+	for i := 1; i <= stats.reqCounts.Len(); i++ {
+		stats.reqCounts = stats.reqCounts.Next()
+		if stats.reqCounts.Value != nil {
+			totalCount = totalCount + stats.reqCounts.Value.(int)
+		}
+	}
+
+	if totalCount > maxAvgMessages && stats.alert == false {
+		fmt.Printf("[Alert] Triggered - %d requests over the past %d seconds", totalCount, alertLoopSeconds)
+		stats.alert = true
+	} else if totalCount <= maxAvgMessages && stats.alert == true {
+		fmt.Printf("[Alert] Recovered - %d requests over the past %d seconds", totalCount, alertLoopSeconds)
+		stats.alert = false
+	}
+
+	// Release lock
+	stats.mux.Unlock()
 }
 
 func main() {
@@ -220,9 +217,16 @@ func main() {
 		ring,
 		make(map[string]int),
 		make(map[int]int),
+		false,
 		sync.Mutex{},
 	}
 
+	// Monitoring subroutine
 	go monitor(accessLog, &stats)
-	alertAndNotify(maxAvgMessages, &stats)
+
+	// Main thread
+	for {
+		time.Sleep(notifyLoopSeconds * time.Second)
+		AlertAndNotify(maxAvgMessages, &stats)
+	}
 }
