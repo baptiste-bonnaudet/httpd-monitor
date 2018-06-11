@@ -163,7 +163,7 @@ func AlertAndNotify(maxAvgMessages int, stats *stats) (message string) {
 		if k > topHitOutout {
 			break
 		}
-		message += fmt.Sprintf("\t- %s: %d \n", v.Key, v.Value)
+		message += fmt.Sprintf("\t- /%s: %d \n", v.Key, v.Value)
 	}
 	message += fmt.Sprintf("Top hit statuses:\n")
 	for k, v := range topStatus {

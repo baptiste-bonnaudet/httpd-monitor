@@ -9,7 +9,7 @@ build: ## Build the test environment
 up: ## Start the test environment 
 	docker-compose up -d 
 
-down: ## Start the test environment 
+down: ## Stop the test environment 
 	docker-compose down --remove-orphans; 
 
 logs: ## Show and follow the containers logs

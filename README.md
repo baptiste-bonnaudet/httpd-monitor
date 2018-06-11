@@ -15,11 +15,12 @@ Then use the `make` commands to pilot the test env.
 ```
 make
 
-build                          Build the test environment
-down                           Start the test environment
+all                            Rebuild and start all containers
+build                          Build the environment
+down                           Stop the environment
 help                           Display this help message
 logs                           Show and follow the containers logs
-up                             Start the test environment
+up                             Start the environment
 ```
 
 ## Todo / improvements
