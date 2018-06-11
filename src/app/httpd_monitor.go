@@ -98,9 +98,9 @@ func UpdateStats(stats *stats, log logLine) {
 		stats.reqCounts.Value = stats.reqCounts.Value.(int) + 1
 	}
 
-	stats.status[log.status] = stats.status[log.status] + 1
+	stats.status[log.status]++
 	section := strings.Split(log.request.path, "/")[1]
-	stats.sections[section] = stats.sections[section] + 1
+	stats.sections[section]++
 }
 
 func monitor(filePath string, stats *stats) {
@@ -116,7 +116,7 @@ func monitor(filePath string, stats *stats) {
 	}
 }
 
-func AlertAndNotify(maxAvgMessages int, stats *stats) {
+func AlertAndNotify(maxAvgMessages int, stats *stats) (message string) {
 
 	//Aquire lock
 	stats.mux.Lock()
@@ -154,23 +154,47 @@ func AlertAndNotify(maxAvgMessages int, stats *stats) {
 	})
 
 	// Notify output
-	fmt.Println("--------------------------------------------------------------")
-	fmt.Printf("[Notify]\n")
-	fmt.Printf("Timestamp: %s \n", timestamp)
-	fmt.Printf("Requests: %d \n", stats.reqCounts.Value)
-	fmt.Printf("Top hit sections:\n")
+	message = "--------------------------------------------------------------\n"
+	message += "[Notify]\n"
+	message += fmt.Sprintf("Timestamp: %s \n", timestamp)
+	message += fmt.Sprintf("Requests: %d \n", stats.reqCounts.Value)
+	message += fmt.Sprintf("Top hit sections:\n")
 	for k, v := range topSections {
 		if k > topHitOutout {
 			break
 		}
-		fmt.Printf("\t- %s: %d \n", v.Key, v.Value)
+		message += fmt.Sprintf("\t- %s: %d \n", v.Key, v.Value)
 	}
-	fmt.Printf("Top hit status:\n")
+	message += fmt.Sprintf("Top hit statuses:\n")
 	for k, v := range topStatus {
 		if k > topHitOutout {
 			break
 		}
-		fmt.Printf("\t- %d: %d \n", v.Key, v.Value)
+		message += fmt.Sprintf("\t- %d: %d \n", v.Key, v.Value)
+	}
+
+	// Alert
+	var totalCount int
+
+	for i := 1; i <= stats.reqCounts.Len(); i++ {
+		stats.reqCounts = stats.reqCounts.Next()
+		if stats.reqCounts.Value != nil {
+			totalCount += stats.reqCounts.Value.(int)
+		}
+	}
+
+	if (totalCount > maxAvgMessages) && (stats.alert == false) {
+		message += fmt.Sprintf("[Alert] Triggered - %d requests over the past %d seconds\n", totalCount, alertLoopSeconds)
+		stats.alert = true
+	} else if (totalCount <= maxAvgMessages) && (stats.alert == true) {
+		message += fmt.Sprintf("[Alert] Recovered - %d requests over the past %d seconds\n", totalCount, alertLoopSeconds)
+		stats.alert = false
+	}
+
+	if stats.alert == true {
+		message += fmt.Sprintf("Alert Status: ON")
+	} else {
+		message += fmt.Sprintf("Alert Status: OFF")
 	}
 
 	// Cleanup
@@ -179,26 +203,10 @@ func AlertAndNotify(maxAvgMessages int, stats *stats) {
 	stats.sections = make(map[string]int)
 	stats.status = make(map[int]int)
 
-	// Alert
-	var totalCount int
-
-	for i := 1; i <= stats.reqCounts.Len(); i++ {
-		stats.reqCounts = stats.reqCounts.Next()
-		if stats.reqCounts.Value != nil {
-			totalCount = totalCount + stats.reqCounts.Value.(int)
-		}
-	}
-
-	if totalCount > maxAvgMessages && stats.alert == false {
-		fmt.Printf("[Alert] Triggered - %d requests over the past %d seconds", totalCount, alertLoopSeconds)
-		stats.alert = true
-	} else if totalCount <= maxAvgMessages && stats.alert == true {
-		fmt.Printf("[Alert] Recovered - %d requests over the past %d seconds", totalCount, alertLoopSeconds)
-		stats.alert = false
-	}
-
 	// Release lock
 	stats.mux.Unlock()
+
+	return
 }
 
 func main() {
@@ -209,7 +217,7 @@ func main() {
 	maxAvgMessages, _ := strconv.Atoi(os.Getenv("MAX_AVERAGE_MESSAGES"))
 
 	ring := ring.New(alertLoopSeconds / notifyLoopSeconds)
-	for i := 1; i <= ring.Len(); i++ {
+	for i := 0; i < ring.Len(); i++ {
 		ring = ring.Next()
 		ring.Value = 0
 	}
@@ -227,6 +235,6 @@ func main() {
 	// Main thread
 	for {
 		time.Sleep(notifyLoopSeconds * time.Second)
-		AlertAndNotify(maxAvgMessages, &stats)
+		fmt.Println(AlertAndNotify(maxAvgMessages, &stats))
 	}
 }

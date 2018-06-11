@@ -14,3 +14,6 @@ down: ## Start the test environment
 
 logs: ## Show and follow the containers logs
 	docker-compose logs -f;
+
+all: ## Rebuild and start all containers
+	make down && make build && make up && make logs

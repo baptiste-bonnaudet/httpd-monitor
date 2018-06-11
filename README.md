@@ -25,5 +25,4 @@ up                             Start the test environment
 ## Todo / improvements
 - parse commandline args and sanitize inputs
 - exclude logs older than our time window during initial parsing.
-- write unit tests for AlertAndNotify
 - write integration/acceptance tests
