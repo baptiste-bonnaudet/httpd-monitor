@@ -25,5 +25,6 @@ up                             Start the environment
 
 ## Todo / improvements
 - parse commandline args and sanitize inputs
+- add feature to be able to change the logs layout
 - exclude logs older than our time window during initial parsing.
 - write integration/acceptance tests
